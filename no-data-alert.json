@@ -1,0 +1,95 @@
+POST  _xpack/watcher/watch/backup-cdr-test/_execute
+
+PUT _xpack/watcher/watch/backup-cdr-test
+{
+  "trigger": {
+    "schedule": {
+      "interval": "15m"
+    }
+  },
+  "input": {
+    "search": {
+      "request": {
+        "search_type": "query_then_fetch",
+        "indices": [
+          "backup-cdr-aaa-test"
+        ],
+        "body": {
+          "size": 0,
+          "query": {
+            "range": {
+              "@timestamp": {
+                "gte": "now-48h"
+              }
+            }
+          },
+          "aggs": {
+            "distribuidores": {
+              "terms": {
+                "field": "distribuidor.nombre",
+                "size": 1000
+              },
+              "aggs": {
+                "histograma": {
+                  "date_histogram": {
+                    "field": "@timestamp",
+                    "interval": "30m"
+                  },
+                  "aggs": {
+                    "conteo": {
+                      "cardinality": {
+                        "field": "_id"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "condition": {
+    "script": {
+      "source": """
+            
+            def events = [];
+            
+            for(def distribuidor: ctx.payload.aggregations.distribuidores.buckets){
+              
+              for(def histograma:distribuidor.histograma.buckets){
+                if(histograma.conteo.value == 0){
+                   events.add([
+                      '@timestamp':histograma.key_as_string,
+                      'message': 'Corte de cable distribuidor '+distribuidor.key+' a las '+histograma.key_as_string
+                    ]);
+                }
+              }
+            }
+            ctx.payload.body = "";
+            for(def event: events){
+              ctx.payload.body += event.message+" <br>" ;
+            }
+            
+            ctx.payload._doc = events;
+
+            
+            ctx.payload._doc = events;
+            return events.size() > 0;
+"""
+    }
+  },
+  "actions": {
+    "index_payload": {
+      "index": {
+        "index": "alertas",
+        "doc_type": "doc"
+      }
+    }
+  }
+}
+
+
+
+
